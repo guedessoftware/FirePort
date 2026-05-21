@@ -1,0 +1,1 @@
+ALTER TABLE "User" ADD COLUMN "colorTheme" TEXT NOT NULL DEFAULT 'teal';

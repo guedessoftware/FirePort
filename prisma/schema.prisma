@@ -1,0 +1,1045 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                       String                @id @default(cuid())
+  email                    String                @unique
+  password                 String
+  name                     String
+  image                    String?
+  colorTheme               String                @default("orange")
+  role                     String // 'admin' or 'landlord'
+  vlan                     Int? // VLAN do operador em ambiente de rede neutra
+  mfaSecretEncrypted       String?
+  mfaEnabledAt             DateTime?
+  mfaPendingSecretEncrypted String?
+  mfaPendingAt             DateTime?
+  passwordResetTokenHash   String?
+  passwordResetExpiresAt   DateTime?
+  passwordResetUsedAt      DateTime?
+  landlord                 Landlord?
+  provisioningProfiles     ProvisioningProfile[]
+  onuAccess                OperatorOnuAccess[]
+  billingPenaltiesCreated  BillingPenalty[]      @relation("BillingPenaltyCreatedBy")
+  billingPenaltiesApproved BillingPenalty[]      @relation("BillingPenaltyApprovedBy")
+  billingAlertsResolved    BillingAlert[]        @relation("BillingAlertResolvedBy")
+  accessControlAudits      AccessControlAudit[]  @relation("AccessControlAuditUser")
+  confidenceReleases       ClientAccessControl[] @relation("AccessControlConfidenceUser")
+  contractTemplatesCreated ContractTemplate[]    @relation("ContractTemplateCreatedBy")
+  contractVersionsPublished ContractVersion[]    @relation("ContractVersionPublishedBy")
+  contractAcceptances       ContractAcceptance[] @relation("ContractAcceptanceUser")
+  contractOtps              ContractAcceptanceOtp[]
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+
+  @@index([passwordResetTokenHash])
+}
+
+model Landlord {
+  id                           String          @id @default(cuid())
+  name                         String
+  document                     String?
+  hubsoftClientId              String?
+  hubsoftClientUuid            String?
+  hubsoftClientCode            Int?
+  hubsoftLegalName             String?
+  hubsoftTradeName             String?
+  hubsoftPersonType            String?
+  hubsoftPrimaryPhone          String?
+  hubsoftSecondaryPhone        String?
+  hubsoftPrimaryEmail          String?
+  hubsoftMunicipalRegistration String?
+  hubsoftStateRegistration     String?
+  hubsoftOrigin                String?
+  hubsoftActive                Boolean         @default(false)
+  hubsoftImportedAt            DateTime?
+  hubsoftRegisteredAt          DateTime?
+  hubsoftUpdatedAt             DateTime?
+  hubsoftRawJson               String?
+  userId                       String          @unique
+  user                         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contracts                    Contract[]
+  billingAccount               BillingAccount?
+  erpConfig                    OperatorErpConfig?
+  erpLinks                     ErpLink[]
+  contractAcceptances          ContractAcceptance[]
+
+  @@index([document])
+  @@index([hubsoftClientId])
+}
+
+model ContractTemplate {
+  id              String            @id @default(cuid())
+  title           String
+  description     String?
+  targetRole      String            @default("landlord")
+  isActive        Boolean           @default(true)
+  activeVersionId String?
+  createdByUserId String?
+  createdByUser   User?             @relation("ContractTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  versions        ContractVersion[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([isActive])
+  @@index([targetRole])
+  @@index([activeVersionId])
+}
+
+model ContractVersion {
+  id              String                  @id @default(cuid())
+  templateId      String
+  template        ContractTemplate        @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  versionNumber   Int
+  title           String
+  bodyText        String
+  bodyHtml        String
+  contentHash     String
+  pdfHash         String?
+  status          String                  @default("published")
+  publishedAt     DateTime?
+  publishedByUserId String?
+  publishedByUser User?                   @relation("ContractVersionPublishedBy", fields: [publishedByUserId], references: [id], onDelete: SetNull)
+  acceptances     ContractAcceptance[]
+  otps            ContractAcceptanceOtp[]
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@unique([templateId, versionNumber])
+  @@index([templateId])
+  @@index([status])
+  @@index([contentHash])
+}
+
+model ContractAcceptance {
+  id               String          @id @default(cuid())
+  versionId        String
+  version          ContractVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User            @relation("ContractAcceptanceUser", fields: [userId], references: [id], onDelete: Cascade)
+  landlordId       String?
+  landlord         Landlord?       @relation(fields: [landlordId], references: [id], onDelete: SetNull)
+  status           String          @default("accepted")
+  signatureMethod  String          @default("otp")
+  otpChallengeId   String?
+  ipAddress        String?
+  userAgent        String?
+  contractHash     String
+  pdfHash          String?
+  previousEvidenceHash String?
+  acceptanceHash   String
+  evidenceJson     String
+  acceptedAt       DateTime        @default(now())
+  createdAt        DateTime        @default(now())
+
+  @@index([versionId])
+  @@index([userId])
+  @@index([landlordId])
+  @@index([status])
+  @@index([acceptedAt])
+}
+
+model ContractAcceptanceOtp {
+  id           String          @id @default(cuid())
+  versionId    String
+  version      ContractVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash     String
+  destination  String?
+  channel      String          @default("email")
+  status       String          @default("pending")
+  attempts     Int             @default(0)
+  expiresAt    DateTime
+  usedAt       DateTime?
+  createdAt    DateTime        @default(now())
+
+  @@index([versionId])
+  @@index([userId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model OperatorErpConfig {
+  id                     String    @id @default(cuid())
+  landlordId             String    @unique
+  landlord               Landlord  @relation(fields: [landlordId], references: [id], onDelete: Cascade)
+  provider               String
+  baseUrl                String
+  enabled                Boolean   @default(false)
+  allowedLookupKeys      String    @default("[\"cpf_cnpj\",\"customer_id\",\"contract_id\"]")
+  tokenEncrypted         String?
+  usernameEncrypted      String?
+  passwordEncrypted      String?
+  clientIdEncrypted      String?
+  clientSecretEncrypted  String?
+  extraJson              String?
+  lastConnectionStatus   String?
+  lastConnectionTestAt   DateTime?
+  lastError              String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([provider])
+  @@index([enabled])
+}
+
+model CTO {
+  id                        String           @id @default(cuid())
+  name                      String
+  address                   String
+  lat                       Float
+  lng                       Float
+  hubsoftId                 String?          @unique // ID único do Hubsoft
+  hubsoftOltDeviceId        String? // ID da OLT/equipamento no Hubsoft
+  hubsoftOltInterfaceId     String? // ID da interface/PON no Hubsoft
+  oltDeviceName             String?
+  oltIpv4                   String?
+  oltInterfaceName          String?
+  oltInterfaceType          String?
+  oltInterfaceIdentifier    String?
+  oltChassi                 Int?
+  oltSlot                   Int?
+  oltPon                    Int?
+  oltVlan                   Int?
+  oltInterfaceId            String?
+  oltInterface              OltInterface?    @relation(fields: [oltInterfaceId], references: [id], onDelete: SetNull)
+  lastSync                  DateTime? // Última atualização do Hubsoft
+  syncStatus                String? // 'synced', 'pending', 'error'
+  syncError                 String? // Detalhes de erro se houver
+  hubsoftDeletedAt          DateTime? // Quando a CTO deixou de aparecer na Hubsoft
+  hubsoftPortsTotal         Int              @default(0)
+  hubsoftPortsReserved      Int              @default(0)
+  hubsoftPortsLinked        Int              @default(0)
+  hubsoftPortsAvailable     Int              @default(0)
+  hubsoftLastOccupationSync DateTime?
+  ports                     Port[]
+  syncAudits                CtoSyncAudit[]
+  billingRunItems           BillingRunItem[]
+  BillingService            BillingService[]
+
+  @@index([lat, lng])
+  @@index([hubsoftId])
+  @@index([hubsoftOltDeviceId])
+  @@index([hubsoftOltInterfaceId])
+  @@index([oltInterfaceId])
+}
+
+model CtoSyncAudit {
+  id                String   @id @default(cuid())
+  ctoId             String?
+  cto               CTO?     @relation(fields: [ctoId], references: [id], onDelete: SetNull)
+  hubsoftId         String?
+  ctoName           String
+  action            String
+  reason            String?
+  provisioningCount Int      @default(0)
+  portCount         Int      @default(0)
+  createdAt         DateTime @default(now())
+
+  @@index([ctoId])
+  @@index([hubsoftId])
+  @@index([action])
+}
+
+model Port {
+  id                      String           @id @default(cuid())
+  ctoId                   String
+  cto                     CTO              @relation(fields: [ctoId], references: [id], onDelete: Cascade)
+  number                  Int
+  status                  String // 'available', 'provisioned'
+  hubsoftId               String?          @unique
+  hubsoftReserved         Boolean          @default(false)
+  hubsoftReference        String?
+  hubsoftHasClientService Boolean          @default(false)
+  hubsoftRawStatus        String?
+  hubsoftLastSync         DateTime?
+  provisioning            Provisioning?
+  billingServices         BillingService[]
+  billingRunItems         BillingRunItem[]
+
+  @@index([hubsoftId])
+  @@index([hubsoftRawStatus])
+  @@index([hubsoftLastSync])
+}
+
+model CPEModel {
+  id             String               @id @default(cuid())
+  name           String
+  description    String?
+  oltProfiles    CpeModelOltProfile[]
+  provisionings  Provisioning[]
+}
+
+model CpeModelOltProfile {
+  id                        String   @id @default(cuid())
+  cpeModelId                String
+  cpeModel                  CPEModel @relation(fields: [cpeModelId], references: [id], onDelete: Cascade)
+  oltManufacturer           String
+  oltModel                  String
+  oltDriver                 String
+  onuType                   String?
+  authorizationCommands     String?
+  provisioningCommands      String?
+  deprovisioningCommands    String?
+  deauthorizationCommands   String?
+  tr069Commands             String?
+  genieAcsParameterMapJson  String?
+  requiredVariablesJson     String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@unique([cpeModelId, oltManufacturer, oltModel, oltDriver])
+  @@index([cpeModelId])
+  @@index([oltManufacturer, oltModel, oltDriver])
+}
+
+model ProvisioningProfile {
+  id                      String   @id @default(cuid())
+  userId                  String
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                    String
+  driver                  String
+  vlan                    Int?
+  serviceVlan             Int?
+  lineProfile             String?
+  serviceProfile          String?
+  gemPort                 Int?
+  tcont                   Int?
+  serviceName             String?
+  isDefault               Boolean  @default(false)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([userId])
+  @@index([driver])
+  @@index([isDefault])
+}
+
+model OltDevice {
+  id                      String                  @id @default(cuid())
+  hubsoftId               String?                 @unique
+  name                    String
+  manufacturer            String
+  model                   String
+  pop                     String?
+  managementServer        String?
+  host                    String
+  ipv4                    String?
+  ipv6                    String?
+  username                String
+  port                    Int                     @default(22)
+  passwordEncrypted       String
+  enablePasswordEncrypted String?
+  useEnableMode           Boolean                 @default(false)
+  driver                  String
+  profileId               String?
+  terminalLengthCommand   String?
+  enterConfigCommand      String?
+  showOnuStateCommand     String?
+  serialLookupCommand     String?
+  rebootOnuCommand        String?
+  saveConfigCommand       String?
+  exitCommands            String?
+  snmpEnabled             Boolean                 @default(false)
+  snmpVersion             String                  @default("2c")
+  snmpCommunityEncrypted  String?
+  snmpPort                Int                     @default(161)
+  snmpVendor              String                  @default("zte_titan")
+  isDefault               Boolean                 @default(false)
+  isActive                Boolean                 @default(true)
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+  interfaces              OltInterface[]
+  onuCurrent              OnuCurrent[]
+  onuHistory              OnuHistory[]
+  onuEvents               OnuEvent[]
+  onuAccess               OperatorOnuAccess[]
+  oltHealthCurrent        OltHealthCurrent?
+  oltHealthHistory        OltHealthHistory[]
+  oltProcessorCurrent     OltProcessorCurrent[]
+  oltTemperatureCurrent   OltTemperatureCurrent[]
+  oltUplinkCurrent        OltUplinkCurrent[]
+
+  @@index([hubsoftId])
+  @@index([driver])
+  @@index([profileId])
+  @@index([isDefault])
+  @@index([isActive])
+  @@index([snmpEnabled])
+  @@index([snmpVendor])
+}
+
+model OltInterface {
+  id                    String    @id @default(cuid())
+  hubsoftId             String?   @unique
+  oltDeviceId           String
+  oltDevice             OltDevice @relation(fields: [oltDeviceId], references: [id], onDelete: Cascade)
+  type                  String    @default("GPON")
+  name                  String
+  description           String?
+  chassi                Int
+  slot                  Int
+  pon                   Int
+  vlan                  Int?
+  routingInterface      String?
+  defaultCpeProfileId   String?
+  requireCtoLink        Boolean   @default(false)
+  blockOverutilization  Boolean   @default(false)
+  enableScan            Boolean   @default(true)
+  scanType              String?
+  alarmSubscriberSignal Int?
+  alarmEquipmentSignal  Int?
+  sequencePort          Int?
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  ctos                  CTO[]
+
+  @@unique([oltDeviceId, type, chassi, slot, pon])
+  @@index([hubsoftId])
+  @@index([oltDeviceId])
+  @@index([type])
+  @@index([isActive])
+}
+
+model Contract {
+  id              String           @id @default(cuid())
+  name            String
+  contractNumber  String
+  cep             String
+  address         String
+  number          String
+  complement      String?
+  reference       String?
+  pppoeLogin      String?
+  pppoePassword   String?
+  lat             Float
+  lng             Float
+  landlordId      String
+  landlord        Landlord         @relation(fields: [landlordId], references: [id], onDelete: Cascade)
+  provisionings   Provisioning[]
+  billingServices BillingService[]
+  billingRunItems BillingRunItem[]
+  erpLink         ErpLink?
+
+  @@unique([landlordId, contractNumber])
+}
+
+model ErpLink {
+  id                    String   @id @default(cuid())
+  landlordId            String
+  landlord              Landlord @relation(fields: [landlordId], references: [id], onDelete: Cascade)
+  contractId            String   @unique
+  contract              Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  provider              String
+  customerExternalId    String?
+  customerDisplayCode   String?
+  customerUrl           String?
+  serviceExternalId     String?
+  contractExternalId    String?
+  serviceDisplayCode    String?
+  serviceUrl            String?
+  planName              String?
+  login                 String?
+  pppoePassword         String?
+  document              String?
+  linkedAt              DateTime @default(now())
+  rawJson               String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([landlordId])
+  @@index([provider])
+  @@index([customerExternalId])
+  @@index([serviceExternalId])
+  @@index([contractExternalId])
+}
+
+model Provisioning {
+  id                String            @id @default(cuid())
+  contractId        String
+  contract          Contract          @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  portId            String            @unique
+  port              Port              @relation(fields: [portId], references: [id], onDelete: Cascade)
+  cpeModelId        String
+  cpeModel          CPEModel          @relation(fields: [cpeModelId], references: [id])
+  serial            String // Serial GPON para provisionamento na OLT
+  status            String // 'active', 'inactive'
+  signal            Int? // signal strength, e.g. -50 dBm
+  onuStatus         String?
+  onuDistanceMeters Int?
+  onuOnlineDuration String?
+  onuRxPower        Float?
+  onuTxPower        Float?
+  genieAcsDeviceId  String?
+  genieAcsSerialParameter String?
+  genieAcsLinkedAt  DateTime?
+  genieAcsLastInformAt DateTime?
+  genieAcsLastSyncAt DateTime?
+  genieAcsSummaryJson String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  logs              ProvisioningLog[]
+  billingService    BillingService?
+  billingRunItems   BillingRunItem[]
+  billingAlerts     BillingAlert[]
+
+  @@index([genieAcsDeviceId])
+  @@index([genieAcsLastInformAt])
+}
+
+model BillingPlan {
+  id                                  String           @id @default(cuid())
+  name                                String
+  description                         String?
+  defaultMinimumAmountCents           Int              @default(0)
+  defaultIncludedProvisionings        Int              @default(0)
+  defaultExtraProvisioningAmountCents Int              @default(0)
+  isDefault                           Boolean          @default(false)
+  isActive                            Boolean          @default(true)
+  createdAt                           DateTime         @default(now())
+  updatedAt                           DateTime         @updatedAt
+  accounts                            BillingAccount[]
+  services                            BillingService[]
+
+  @@index([isDefault])
+  @@index([isActive])
+}
+
+model BillingAccount {
+  id                           String                   @id @default(cuid())
+  landlordId                   String                   @unique
+  landlord                     Landlord                 @relation(fields: [landlordId], references: [id], onDelete: Cascade)
+  hubsoftClientServiceId       String?
+  hubsoftServiceName           String                   @default("Servico de Rede Neutra")
+  billingPlanId                String?
+  billingPlan                  BillingPlan?             @relation(fields: [billingPlanId], references: [id], onDelete: SetNull)
+  minimumAmountCents           Int                      @default(0)
+  includedProvisionings        Int                      @default(0)
+  extraProvisioningAmountCents Int                      @default(0)
+  dueDay                       Int                      @default(10)
+  firstActivationAt            DateTime?
+  billingStartedAt             DateTime?
+  status                       String                   @default("active")
+  notes                        String?
+  createdAt                    DateTime                 @default(now())
+  updatedAt                    DateTime                 @updatedAt
+  services                     BillingService[]
+  runs                         BillingRun[]
+  penalties                    BillingPenalty[]
+  alerts                       BillingAlert[]
+  invoiceSnapshots             HubsoftInvoiceSnapshot[]
+  accessControl                ClientAccessControl?
+  accessControlAudits          AccessControlAudit[]
+  accessControlNotifications   AccessControlNotification[]
+
+  @@index([hubsoftClientServiceId])
+  @@index([billingPlanId])
+  @@index([status])
+}
+
+model ClientAccessControl {
+  id                              String         @id @default(cuid())
+  billingAccountId                String         @unique
+  billingAccount                  BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  state                           String         @default("active_normal")
+  financialState                  String         @default("active_normal")
+  administrativeBlockActive       Boolean        @default(false)
+  administrativeBlockReason       String?
+  administrativeBlockDetails      String?
+  confidenceReleaseUntil          DateTime?
+  confidenceReleaseGrantedAt      DateTime?
+  confidenceReleaseGrantedByUserId String?
+  confidenceReleaseGrantedByUser  User?          @relation("AccessControlConfidenceUser", fields: [confidenceReleaseGrantedByUserId], references: [id], onDelete: SetNull)
+  overdueDays                     Int            @default(0)
+  lastEvaluatedAt                 DateTime?
+  pendingAction                   String?
+  pendingError                    String?
+  createdAt                       DateTime       @default(now())
+  updatedAt                       DateTime       @updatedAt
+
+  @@index([billingAccountId])
+  @@index([state])
+  @@index([financialState])
+  @@index([administrativeBlockActive])
+  @@index([pendingAction])
+}
+
+model AccessControlAudit {
+  id               String          @id @default(cuid())
+  billingAccountId String
+  billingAccount   BillingAccount  @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  userId           String?
+  user             User?           @relation("AccessControlAuditUser", fields: [userId], references: [id], onDelete: SetNull)
+  origin           String
+  action           String
+  reason           String
+  previousState    String?
+  nextState        String?
+  contractId       String?
+  provisioningId   String?
+  onuReference     String?
+  ruleApplied      String?
+  result           String          @default("success")
+  details          String?
+  createdAt        DateTime        @default(now())
+
+  @@index([billingAccountId])
+  @@index([userId])
+  @@index([origin])
+  @@index([action])
+  @@index([result])
+  @@index([createdAt])
+}
+
+model AccessControlNotification {
+  id               String         @id @default(cuid())
+  billingAccountId String
+  billingAccount   BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  stage            String
+  channels         String
+  message          String
+  status           String         @default("pending")
+  attempts         Int            @default(0)
+  lastAttemptAt    DateTime?
+  lastError        String?
+  details          String?
+  createdAt        DateTime       @default(now())
+  sentAt           DateTime?
+
+  @@index([billingAccountId])
+  @@index([stage])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model BillingService {
+  id               String           @id @default(cuid())
+  billingAccountId String
+  billingAccount   BillingAccount   @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  provisioningId   String           @unique
+  provisioning     Provisioning     @relation(fields: [provisioningId], references: [id], onDelete: Cascade)
+  contractId       String
+  contract         Contract         @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  portId           String
+  port             Port             @relation(fields: [portId], references: [id], onDelete: Cascade)
+  ctoId            String
+  cto              CTO              @relation(fields: [ctoId], references: [id], onDelete: Cascade)
+  serial           String
+  activatedAt      DateTime
+  canceledAt       DateTime?
+  status           String           @default("active")
+  billingPlanId    String?
+  billingPlan      BillingPlan?     @relation(fields: [billingPlanId], references: [id], onDelete: SetNull)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  runItems         BillingRunItem[]
+
+  @@index([billingAccountId])
+  @@index([contractId])
+  @@index([portId])
+  @@index([ctoId])
+  @@index([status])
+  @@index([activatedAt])
+  @@index([canceledAt])
+}
+
+model BillingCycle {
+  id          String       @id @default(cuid())
+  year        Int
+  month       Int
+  competence  String
+  periodStart DateTime
+  periodEnd   DateTime
+  closingAt   DateTime
+  status      String       @default("open")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  runs        BillingRun[]
+
+  @@unique([competence])
+  @@unique([year, month])
+  @@index([closingAt])
+  @@index([status])
+}
+
+model BillingRun {
+  id                        String                   @id @default(cuid())
+  billingCycleId            String
+  billingCycle              BillingCycle             @relation(fields: [billingCycleId], references: [id], onDelete: Cascade)
+  billingAccountId          String
+  billingAccount            BillingAccount           @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  competence                String
+  hubsoftClientServiceId    String?
+  dueDay                    Int
+  activeProvisioningCount   Int                      @default(0)
+  includedProvisioningCount Int                      @default(0)
+  extraProvisioningCount    Int                      @default(0)
+  minimumAmountCents        Int                      @default(0)
+  extraAmountCents          Int                      @default(0)
+  penaltyAmountCents        Int                      @default(0)
+  totalAmountCents          Int                      @default(0)
+  status                    String                   @default("draft")
+  idempotencyKey            String                   @unique
+  calculatedAt              DateTime?
+  sentAt                    DateTime?
+  reconciledAt              DateTime?
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  items                     BillingRunItem[]
+  penalties                 BillingPenalty[]
+  hubsoftEvent              HubsoftBillingEvent?
+  alerts                    BillingAlert[]
+  invoiceSnapshots          HubsoftInvoiceSnapshot[]
+
+  @@unique([billingAccountId, competence])
+  @@index([billingCycleId])
+  @@index([billingAccountId])
+  @@index([competence])
+  @@index([status])
+}
+
+model BillingRunItem {
+  id                  String          @id @default(cuid())
+  billingRunId        String
+  billingRun          BillingRun      @relation(fields: [billingRunId], references: [id], onDelete: Cascade)
+  billingServiceId    String?
+  billingService      BillingService? @relation(fields: [billingServiceId], references: [id], onDelete: SetNull)
+  provisioningId      String?
+  provisioning        Provisioning?   @relation(fields: [provisioningId], references: [id], onDelete: SetNull)
+  contractId          String?
+  contract            Contract?       @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  ctoId               String?
+  cto                 CTO?            @relation(fields: [ctoId], references: [id], onDelete: SetNull)
+  portId              String?
+  port                Port?           @relation(fields: [portId], references: [id], onDelete: SetNull)
+  serial              String?
+  itemType            String
+  description         String
+  amountCents         Int             @default(0)
+  isIncludedInMinimum Boolean         @default(false)
+  activatedAt         DateTime?
+  canceledAt          DateTime?
+  createdAt           DateTime        @default(now())
+
+  @@index([billingRunId])
+  @@index([billingServiceId])
+  @@index([provisioningId])
+  @@index([itemType])
+}
+
+model BillingPenalty {
+  id                     String         @id @default(cuid())
+  billingAccountId       String
+  billingAccount         BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  amountCents            Int
+  reason                 String
+  evidence               String?
+  status                 String         @default("approved")
+  createdByUserId        String?
+  createdByUser          User?          @relation("BillingPenaltyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedByUserId       String?
+  approvedByUser         User?          @relation("BillingPenaltyApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  approvedAt             DateTime?
+  includedInBillingRunId String?
+  includedInBillingRun   BillingRun?    @relation(fields: [includedInBillingRunId], references: [id], onDelete: SetNull)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  @@index([billingAccountId])
+  @@index([status])
+  @@index([includedInBillingRunId])
+  @@index([createdByUserId])
+  @@index([approvedByUserId])
+}
+
+model HubsoftBillingEvent {
+  id                     String     @id @default(cuid())
+  billingRunId           String     @unique
+  billingRun             BillingRun @relation(fields: [billingRunId], references: [id], onDelete: Cascade)
+  hubsoftClientServiceId String
+  hubsoftEventType       String     @default("Servico de Rede Neutra")
+  idempotencyKey         String     @unique
+  amountCents            Int
+  description            String
+  requestPayload         String?
+  responsePayload        String?
+  status                 String     @default("pending")
+  attempts               Int        @default(0)
+  lastError              String?
+  sentAt                 DateTime?
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+
+  @@index([hubsoftClientServiceId])
+  @@index([status])
+}
+
+model BillingAlert {
+  id               String          @id @default(cuid())
+  billingAccountId String?
+  billingAccount   BillingAccount? @relation(fields: [billingAccountId], references: [id], onDelete: SetNull)
+  provisioningId   String?
+  provisioning     Provisioning?   @relation(fields: [provisioningId], references: [id], onDelete: SetNull)
+  billingRunId     String?
+  billingRun       BillingRun?     @relation(fields: [billingRunId], references: [id], onDelete: SetNull)
+  type             String
+  severity         String          @default("warn")
+  message          String
+  details          String?
+  status           String          @default("open")
+  resolvedByUserId String?
+  resolvedByUser   User?           @relation("BillingAlertResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+  resolvedAt       DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([billingAccountId])
+  @@index([provisioningId])
+  @@index([billingRunId])
+  @@index([type])
+  @@index([severity])
+  @@index([status])
+}
+
+model HubsoftInvoiceSnapshot {
+  id                     String         @id @default(cuid())
+  billingAccountId       String
+  billingAccount         BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  billingRunId           String?
+  billingRun             BillingRun?    @relation(fields: [billingRunId], references: [id], onDelete: SetNull)
+  hubsoftInvoiceId       String?
+  hubsoftClientServiceId String
+  competence             String?
+  dueDate                DateTime?
+  amountCents            Int?
+  status                 String?
+  rawPayload             String?
+  syncedAt               DateTime       @default(now())
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  @@index([billingAccountId])
+  @@index([billingRunId])
+  @@index([hubsoftInvoiceId])
+  @@index([hubsoftClientServiceId])
+  @@index([competence])
+  @@index([status])
+}
+
+model ProvisioningLog {
+  id             String       @id @default(cuid())
+  provisioningId String
+  provisioning   Provisioning @relation(fields: [provisioningId], references: [id], onDelete: Cascade)
+  level          String       @default("info")
+  stage          String
+  message        String
+  details        String?
+  createdAt      DateTime     @default(now())
+
+  @@index([provisioningId])
+  @@index([level])
+  @@index([createdAt])
+}
+
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+}
+
+model OnuCurrent {
+  id          String    @id @default(cuid())
+  oltId       String
+  olt         OltDevice @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  porta       String
+  ponIndex    BigInt
+  onuId       Int
+  statusCode  Int?
+  statusName  String?
+  rxDbm       Float?
+  txDbm       Float?
+  lastOnline  DateTime?
+  lastOffline DateTime?
+  learnedMac  String?
+  collectedAt DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([oltId, ponIndex, onuId])
+  @@index([oltId])
+  @@index([porta])
+  @@index([statusName])
+  @@index([rxDbm])
+  @@index([collectedAt])
+}
+
+model OnuHistory {
+  id          String    @id @default(cuid())
+  oltId       String
+  olt         OltDevice @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  porta       String
+  ponIndex    BigInt
+  onuId       Int
+  statusCode  Int?
+  statusName  String?
+  rxDbm       Float?
+  txDbm       Float?
+  collectedAt DateTime  @default(now())
+
+  @@index([oltId, ponIndex, onuId])
+  @@index([statusName])
+  @@index([collectedAt])
+}
+
+model OperatorOnuAccess {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  oltId     String
+  olt       OltDevice @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  ponIndex  BigInt
+  onuId     Int
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, oltId, ponIndex, onuId])
+  @@index([userId])
+  @@index([oltId, ponIndex, onuId])
+}
+
+model OnuEvent {
+  id            String    @id @default(cuid())
+  oltId         String
+  olt           OltDevice @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  ponIndex      BigInt
+  onuId         Int
+  eventType     String
+  previousValue String?
+  currentValue  String?
+  createdAt     DateTime  @default(now())
+
+  @@index([oltId, ponIndex, onuId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model OltHealthCurrent {
+  id                  String    @id @default(cuid())
+  oltId               String    @unique
+  olt                 OltDevice @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  temperatureC        Int?
+  processorCount      Int       @default(0)
+  maxCpu5sPercent     Int?
+  maxCpu1mPercent     Int?
+  maxCpu5mPercent     Int?
+  maxMemUsedPercent   Int?
+  sensorWarningCount  Int       @default(0)
+  sensorCriticalCount Int       @default(0)
+  uplinkCount         Int       @default(0)
+  uplinkDownCount     Int       @default(0)
+  collectedAt         DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([oltId])
+  @@index([collectedAt])
+}
+
+model OltHealthHistory {
+  id                  String    @id @default(cuid())
+  oltId               String
+  olt                 OltDevice @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  temperatureC        Int?
+  processorCount      Int       @default(0)
+  maxCpu5sPercent     Int?
+  maxCpu1mPercent     Int?
+  maxCpu5mPercent     Int?
+  maxMemUsedPercent   Int?
+  sensorWarningCount  Int       @default(0)
+  sensorCriticalCount Int       @default(0)
+  uplinkCount         Int       @default(0)
+  uplinkDownCount     Int       @default(0)
+  collectedAt         DateTime  @default(now())
+
+  @@index([oltId])
+  @@index([collectedAt])
+}
+
+model OltProcessorCurrent {
+  id             String    @id @default(cuid())
+  oltId          String
+  olt            OltDevice @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  processorIndex String
+  character      String
+  role           String?
+  cpu5sPercent   Int?
+  cpu1mPercent   Int?
+  cpu5mPercent   Int?
+  peakCpuPercent Int?
+  physicalMemMb  Int?
+  freeMemMb      Int?
+  memUsedPercent Int?
+  collectedAt    DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([oltId, processorIndex])
+  @@index([oltId])
+  @@index([cpu5sPercent])
+  @@index([memUsedPercent])
+  @@index([collectedAt])
+}
+
+model OltTemperatureCurrent {
+  id           String    @id @default(cuid())
+  oltId        String
+  olt          OltDevice @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  sensorIndex  String
+  board        String?
+  sensor       String?
+  statusCode   Int?
+  statusName   String?
+  temperatureC Int?
+  threshold1C  Int?
+  threshold2C  Int?
+  threshold3C  Int?
+  threshold4C  Int?
+  collectedAt  DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([oltId, sensorIndex])
+  @@index([oltId])
+  @@index([statusName])
+  @@index([temperatureC])
+  @@index([collectedAt])
+}
+
+model OltUplinkCurrent {
+  id            String    @id @default(cuid())
+  oltId         String
+  olt           OltDevice @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  ifIndex       Int
+  interfaceName String
+  operStatus    String
+  rxMbps        Float?
+  txMbps        Float?
+  observation   String?
+  collectedAt   DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([oltId, ifIndex])
+  @@index([oltId])
+  @@index([operStatus])
+  @@index([collectedAt])
+}
